@@ -21,25 +21,32 @@ def check_password():
     if st.session_state.get('password_correct', False):
         return True
 
+    st.title("🔒 認証が必要です")
+    password_input = st.text_input("合言葉を入力してください", type="password")
+    
+    if st.button("ログイン"):
+        # Secretsにパスワードが設定されているか確認
+        if "APP_PASSWORD" not in st.secrets:
+            st.error("エラー: Secretsに 'APP_PASSWORD' が設定されていません。管理者に連絡してください。")
+            return False
+            
+        if password_input == st.secrets["APP_PASSWORD"]:
+            st.session_state['password_correct'] = True
+            st.rerun()  # 画面を再読み込みしてメイン画面へ
+        else:
+            st.error("パスワードが違います 🙅‍♂️")
+            
+    return False
+
+# ⚠️ ここで認証チェック！通らなければ処理をストップ
+if not check_password():
+    st.stop()
+
 # ==========================================
-# 👇 ここから下を書き換えてください
+# 👇 ここから下は、認証成功後にだけ実行されます
 # ==========================================
 
 st.title('たいやき画像データベース(º-º э)З')
-
-# --- 📱 スマホ用CSS注入 (案2の実装) ---
-# スマホ(幅640px以下)のとき、カラムを強制的に横並び(50%幅)にする
-st.markdown("""
-<style>
-@media (max-width: 640px) {
-    div[data-testid="column"] {
-        width: 50% !important;
-        flex: 0 0 50% !important;
-        min-width: 50% !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
 
 # --- 認証関数 ---
 @st.cache_resource
@@ -151,49 +158,26 @@ defaults = {'display_limit': INITIAL_DISPLAY_COUNT, 'shuffled_indices': [], 'las
 for key, val in defaults.items():
     if key not in st.session_state: st.session_state[key] = val
 
-# --- サイドバー (フォルダIDなどの技術設定のみ残す) ---
-st.sidebar.header("🔧 システム設定")
+# サイドバー設定
+st.sidebar.header("設定")
 default_id = ""
 try:
     if "FOLDER_ID" in st.secrets:
         default_id = st.secrets["FOLDER_ID"]
+        st.sidebar.caption("✅ 自動入力成功")
 except Exception:
     pass
 folder_id_input = st.sidebar.text_input("親フォルダID", value=default_id)
 
-if st.sidebar.button("キャッシュクリア & 再読込"):
-    st.cache_data.clear()
-    st.session_state.last_filter_key = None
-    st.rerun()
+st.sidebar.subheader("表示モード")
+mode = st.sidebar.radio(
+    "探索方法:",
+    ('🎲 完全ランダム', '🗓️ 今の季節のイラスト', '📅 日付指定検索'),
+    index=0,
+    key="mode_selection"
+)
 
-# --- メイン設定エリア (案1の実装: Expanderへの移動) ---
-# ここで列数やモードを操作できるように変更
-with st.expander("⚙️ 表示設定・検索フィルター", expanded=True):
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        # モード選択
-        mode = st.radio(
-            "探索方法:",
-            ('🎲 完全ランダム', '🗓️ 今の季節のイラスト', '📅 日付指定検索'),
-            index=0,
-            key="mode_selection"
-        )
-    with col2:
-        # 列数スライダー (スマホではCSSで無視されるがPCでは有効)
-        col_num = st.slider("画像の列数 (PC用)", min_value=2, max_value=8, value=4)
-
-    # 日付検索用のセレクタもExpander内に移動
-    selected_year = "すべて"
-    selected_month = "すべて"
-    selected_day = "すべて"
-    
-    if mode == '📅 日付指定検索':
-        st.markdown("---")
-        # サービス取得前でもUIパーツは表示できるように変数は仮置きで処理したいが、
-        # ここでは後続処理のためにコンテナを分ける
-        d_col1, d_col2, d_col3 = st.columns(3)
-        # 実際の選択肢は画像ロード後に生成する必要があるため、ここではプレースホルダーのみ
-        # ※ロジックの簡略化のため、ドロップダウンの中身は後ほど設定
+col_num = st.sidebar.slider("列数", min_value=2, max_value=8, value=4)
 
 # メイン処理
 if folder_id_input:
@@ -213,16 +197,14 @@ if folder_id_input:
             years = sorted(list(set([img['_dt'].year for img in all_images if img['_dt']])))
             years_options = ["すべて"] + years
 
-            # 日付指定ロジックのUI配置 (Expander内への配置変え)
             if mode == '📅 日付指定検索':
                 is_random_sort = False
-                # Expander内の日付セレクタを表示
-                with d_col1:
-                    selected_year = st.selectbox("年", years_options, key="sel_year")
-                with d_col2:
-                    selected_month = st.selectbox("月", ["すべて"] + list(range(1, 13)), key="sel_month")
-                with d_col3:
-                    selected_day = st.selectbox("日", ["すべて"] + list(range(1, 32)), key="sel_day")
+                st.sidebar.markdown("---")
+                st.sidebar.write("📅 **日付条件**")
+                
+                selected_year = st.sidebar.selectbox("年", years_options, key="sel_year")
+                selected_month = st.sidebar.selectbox("月", ["すべて"] + list(range(1, 13)), key="sel_month")
+                selected_day = st.sidebar.selectbox("日", ["すべて"] + list(range(1, 32)), key="sel_day")
                 
                 for img in all_images:
                     dt = img['_dt']
@@ -235,7 +217,7 @@ if folder_id_input:
                 filtered_images.sort(key=lambda x: x.get('createdTime', ''))
                 filter_key = f"{mode}-{selected_year}-{selected_month}-{selected_day}"
                 if filtered_images:
-                    st.info(f"📅 指定期間: {len(filtered_images)} 枚")
+                    st.info(f"📅 指定期間: {len(filtered_images)} 枚 （ドライブ登録順）")
 
             elif mode == '🗓️ 今の季節のイラスト':
                 filtered_images = [img for img in all_images if is_same_season(img['_dt'])]
@@ -244,8 +226,7 @@ if folder_id_input:
             
             else: 
                 filtered_images = all_images
-                # ランダムモード時の情報表示も少し控えめに
-                st.caption(f"全 {len(all_images)} 枚からランダム表示中")
+                st.caption(f"全 {len(all_images)} 枚からランダム表示")
                 filter_key = mode
 
             if st.session_state.last_filter_key != filter_key:
@@ -268,24 +249,18 @@ if folder_id_input:
                 current_limit = st.session_state.display_limit
                 indices_to_show = display_indices[:current_limit]
                 
-                # 画像表示ループ
                 cols = st.columns(col_num)
                 for i, idx in enumerate(indices_to_show):
                     img = filtered_images[idx]
-                    # スマホではCSSが効いて強制的に2列になるが、
-                    # col_numでの割り振りロジック自体は維持する必要がある
                     with cols[i % col_num]:
                         if 'thumbnailLink' in img:
                             thumb_url = get_high_res_url(img['thumbnailLink'])
                             safe_name = html.escape(img['name'])
-                            
-                            # 画像表示用HTML
-                            # スマホで見やすいようにマージンを少し調整
                             html_code = f"""
-                                <div style="text-align:center; margin-bottom:10px;">
+                                <div style="text-align:center; margin-bottom:5px;">
                                     <a href="{img['webViewLink']}" target="_blank">
                                         <img src="{thumb_url}" 
-                                             style="width:100%; border-radius:8px; object-fit:contain; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" 
+                                             style="width:100%; border-radius:5px; object-fit:contain;" 
                                              referrerpolicy="no-referrer" 
                                              alt="{safe_name}">
                                     </a>
@@ -296,11 +271,11 @@ if folder_id_input:
                             dt = img.get('_dt')
                             if dt:
                                 date_str = dt.strftime('%Y/%m/%d')
+                                st.caption(f"[{safe_name}]") 
                                 st.caption(f"📅 {date_str}")
-                                # ボタンも少しコンパクトに
-                                if st.button("🔍この日", key=f"btn_{img['id']}", on_click=change_mode_to_date, args=(dt.year, dt.month, dt.day)):
-                                    pass
+                                st.button("🔍 この日の全画像", key=f"btn_{img['id']}", on_click=change_mode_to_date, args=(dt.year, dt.month, dt.day))
                             else:
+                                st.caption(f"[{safe_name}]")
                                 st.caption("📅 日付不明")
 
                 if current_limit < len(filtered_images):
@@ -317,4 +292,3 @@ if st.sidebar.button("キャッシュクリア & 再読込"):
     st.cache_data.clear()
     st.session_state.last_filter_key = None
     st.rerun()
-
