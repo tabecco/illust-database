@@ -1,0 +1,14 @@
+# 絶対にアップロードしてはいけない認証情報
+token.json
+client_secret.json
+
+# Streamlit secrets (ローカル設定)
+.streamlit/secrets.toml
+.streamlit/
+
+# Python環境・キャッシュファイル
+__pycache__/
+*.py[cod]
+venv/
+env/
+.DS_Store
