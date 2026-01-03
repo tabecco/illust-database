@@ -10,15 +10,49 @@ from googleapiclient.discovery import build
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 INITIAL_DISPLAY_COUNT = 30
 LOAD_MORE_COUNT = 30
-CACHE_TTL = 3600  # サービスアカウントは切れないのでキャッシュ時間を延ばしても安心
+CACHE_TTL = 3600
 
-# --- 認証関数（サービスアカウント専用） ---
+# --- UI構築（最初に宣言） ---
+st.set_page_config(page_title="たいやきDB", layout="wide", page_icon="🐟")
+
+# --- 🔐 パスワード認証機能 ---
+def check_password():
+    """パスワード認証が成功したらTrueを返す"""
+    if st.session_state.get('password_correct', False):
+        return True
+
+    st.title("🔒 認証が必要です")
+    password_input = st.text_input("合言葉を入力してください", type="password")
+    
+    if st.button("ログイン"):
+        # Secretsにパスワードが設定されているか確認
+        if "APP_PASSWORD" not in st.secrets:
+            st.error("エラー: Secretsに 'APP_PASSWORD' が設定されていません。管理者に連絡してください。")
+            return False
+            
+        if password_input == st.secrets["APP_PASSWORD"]:
+            st.session_state['password_correct'] = True
+            st.rerun()  # 画面を再読み込みしてメイン画面へ
+        else:
+            st.error("パスワードが違います 🙅‍♂️")
+            
+    return False
+
+# ⚠️ ここで認証チェック！通らなければ処理をストップ
+if not check_password():
+    st.stop()
+
+# ==========================================
+# 👇 ここから下は、認証成功後にだけ実行されます
+# ==========================================
+
+st.title('たいやき画像データベース(º-º э)З')
+
+# --- 認証関数 ---
 @st.cache_resource
 def get_drive_service():
-    # Secretsからサービスアカウント情報を取得
     if "service_account" in st.secrets:
         try:
-            # st.secretsはTOML形式だが、辞書として使えるためそのまま渡す
             key_dict = st.secrets["service_account"]
             creds = service_account.Credentials.from_service_account_info(
                 key_dict, scopes=SCOPES
@@ -93,7 +127,6 @@ def fetch_all_images_recursively(_service, folder_id):
                 page_token = results.get('nextPageToken')
                 if not page_token: break
             except Exception as e:
-                # 権限エラーなどは無視して続行
                 break
     
     if _service:
@@ -124,10 +157,6 @@ def change_mode_to_date(year, month, day):
 defaults = {'display_limit': INITIAL_DISPLAY_COUNT, 'shuffled_indices': [], 'last_mode': None, 'last_filter_key': None, 'sel_year': "すべて", 'sel_month': "すべて", 'sel_day': "すべて"}
 for key, val in defaults.items():
     if key not in st.session_state: st.session_state[key] = val
-
-# --- UI構築 ---
-st.set_page_config(page_title="たいやきDB", layout="wide", page_icon="🐟")
-st.title('たいやき画像データベース(º-º э)З')
 
 # サイドバー設定
 st.sidebar.header("設定")
@@ -161,7 +190,7 @@ if folder_id_input:
             all_images = fetch_all_images_recursively(service, folder_id_input)
         
         if not all_images:
-            st.error("画像が見つかりませんでした。フォルダの共有設定（ロボットの招待）を忘れていませんか？")
+            st.error("画像が見つかりませんでした。フォルダの共有設定を忘れていませんか？")
         else:
             filtered_images = []
             is_random_sort = True
