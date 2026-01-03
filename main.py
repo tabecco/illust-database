@@ -1,62 +1,35 @@
 import streamlit as st
-import os.path
-import random
 import datetime
 import re
 import html
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+import random
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 # --- 設定 ---
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 INITIAL_DISPLAY_COUNT = 30
 LOAD_MORE_COUNT = 30
-CACHE_TTL = 1800
+CACHE_TTL = 3600  # サービスアカウントは切れないのでキャッシュ時間を延ばしても安心
 
-# --- 認証関数（クラウド・ローカル両対応） ---
+# --- 認証関数（サービスアカウント専用） ---
 @st.cache_resource
 def get_drive_service():
-    creds = None
-    
-    # 1. Streamlit CloudのSecretsに設定がある場合（クラウド用）
-    if "GOOGLE_OAUTH" in st.secrets:
+    # Secretsからサービスアカウント情報を取得
+    if "service_account" in st.secrets:
         try:
-            info = st.secrets["GOOGLE_OAUTH"]
-            creds = Credentials(
-                token=None, # アクセストークンは自動取得
-                refresh_token=info["refresh_token"],
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=info["client_id"],
-                client_secret=info["client_secret"],
-                scopes=SCOPES
+            # st.secretsはTOML形式だが、辞書として使えるためそのまま渡す
+            key_dict = st.secrets["service_account"]
+            creds = service_account.Credentials.from_service_account_info(
+                key_dict, scopes=SCOPES
             )
+            return build('drive', 'v3', credentials=creds)
         except Exception as e:
-            st.error(f"Secretsからの認証に失敗しました: {e}")
+            st.error(f"認証エラー: Secretsの設定を確認してください。\n詳細: {e}")
             return None
-
-    # 2. ローカルにファイルがある場合（開発用）
-    elif os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    
-    # 認証情報の有効性チェックと更新
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # クラウド上でここに来たらエラー（ブラウザ認証できないため）
-            if "GOOGLE_OAUTH" in st.secrets:
-                st.error("認証トークンの期限切れです。Secretsのrefresh_tokenを更新してください。")
-                return None
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'client_secret.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-                with open('token.json', 'w') as token:
-                    token.write(creds.to_json())
-                    
-    return build('drive', 'v3', credentials=creds)
+    else:
+        st.error("Secretsに [service_account] の設定が見つかりません。")
+        return None
 
 # --- 日付解析ロジック ---
 def parse_date_from_filename(filename, fallback_iso_date):
@@ -159,7 +132,6 @@ st.title('たいやき画像データベース(º-º э)З')
 # サイドバー設定
 st.sidebar.header("設定")
 default_id = ""
-# Secretsの読み込み (フォルダ構造に対応)
 try:
     if "FOLDER_ID" in st.secrets:
         default_id = st.secrets["FOLDER_ID"]
@@ -182,15 +154,14 @@ col_num = st.sidebar.slider("列数", min_value=2, max_value=8, value=4)
 if folder_id_input:
     service = get_drive_service()
     
-    # サービス取得失敗時のガード
     if service is None:
-        st.error("Google Driveへの接続に失敗しました。設定を確認してください。")
+        st.warning("準備中... Secretsの設定を確認してください。")
     else:
         with st.spinner('データベースを解析中...'):
             all_images = fetch_all_images_recursively(service, folder_id_input)
         
         if not all_images:
-            st.error("画像が見つかりませんでした。")
+            st.error("画像が見つかりませんでした。フォルダの共有設定（ロボットの招待）を忘れていませんか？")
         else:
             filtered_images = []
             is_random_sort = True
